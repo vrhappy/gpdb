@@ -11,6 +11,12 @@ Feature: gpcheckcat tests
         Then gpcheckcat should return a return code of 0
         And the user runs "dropdb all_good"
 
+    Scenario: run cross consistency tests for specific catalog table in gpcheckcat
+        Given database "catalog_good" is dropped and recreated
+        Then the user runs "gpcheckcat -C pg_class"
+        Then gpcheckcat should return a return code of 0
+        And the user runs "dropdb catalog_good"
+
     Scenario: gpcheckcat should drop leaked schemas
         Given database "leak_db" is dropped and recreated
         And the user runs the command "psql leak_db -f 'test/behave/mgmt_utils/steps/data/gpcheckcat/create_temp_schema_leak.sql'" in the background without sleep
