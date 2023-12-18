@@ -51,7 +51,7 @@ test: instr_in_shmem_setup
 test: instr_in_shmem
 
 test: createdb
-test: gp_aggregates gp_aggregates_costs gp_metadata variadic_parameters default_parameters function_extensions spi gp_xml shared_scan update_gp triggers_gp returning_gp gp_types combocid_gp gp_sort gp_prepared_xacts gp_backend_info gp_locale
+test: gp_aggregates gp_aggregates_costs gp_metadata variadic_parameters default_parameters function_extensions spi gp_xml shared_scan update_gp triggers_gp returning_gp gp_types combocid_gp gp_sort gp_prepared_xacts gp_backend_info gp_locale foreign_key_gp
 test: spi_processed64bit
 test: gp_lock
 test: gp_tablespace_with_faults
@@ -196,7 +196,8 @@ test: rpt rpt_joins rpt_tpch rpt_returning
 # NOTE: The bfv_temp test assumes that there are no temporary tables in
 # other sessions. Therefore the other tests in this group mustn't create
 # temp tables
-test: bfv_cte bfv_joins bfv_subquery bfv_planner bfv_legacy bfv_temp bfv_dml
+test: bfv_cte
+test: bfv_joins bfv_subquery bfv_planner bfv_legacy bfv_temp bfv_dml
 
 test: qp_olap_mdqa qp_misc gp_recursive_cte qp_dml_joins qp_skew qp_select partition_prune_opfamily gp_tsrf qp_join_union_all qp_join_universal
 
