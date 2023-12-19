@@ -14,6 +14,7 @@ Feature: gpcheckcat tests
     Scenario: run cross consistency tests for specific catalog table in gpcheckcat
         When the user runs "gpcheckcat -C pg_class"
         Then gpcheckcat should return a return code of 0
+        And gpcheckcat should not print "Execution error:" to stdout
 
     Scenario: gpcheckcat should drop leaked schemas
         Given database "leak_db" is dropped and recreated
