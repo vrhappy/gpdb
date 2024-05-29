@@ -1,3 +1,7 @@
+-- start_matchsubs
+-- m/\(cost=.*\)/
+-- s/\(cost=.*\)//
+-- end_matchsubs
 -- Test the optimizer_enable_dml_constraints GUC, which forces GPORCA to fall back when there
 -- are NULL or CHECK constraints on a table.
 set optimizer_trace_fallback = on;
@@ -286,3 +290,11 @@ select array_agg(a order by b)
 (1 row)
 
 reset optimizer_enable_orderedagg;
+-- Orca should fallback if a function in 'from' clause uses 'WITH ORDINALITY'
+SELECT * FROM jsonb_array_elements('["b", "a"]'::jsonb) WITH ORDINALITY;
+ value | ordinality 
+-------+------------
+ "b"   |          1
+ "a"   |          2
+(2 rows)
+

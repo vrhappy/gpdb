@@ -33,7 +33,8 @@ try:
     from gppylib.operations.startSegments import MIRROR_MODE_MIRRORLESS
     from gppylib.system import configurationInterface, configurationImplGpdb
     from gppylib.system.environment import GpCoordinatorEnvironment
-    from gppylib.gpcatalog import COORDINATOR_ONLY_TABLES
+    from gppylib.gpcatalog import COORDINATOR_ONLY_TABLES_MAPPED
+    from gppylib.gpcatalog import COORDINATOR_ONLY_TABLES_NON_MAPPED
     from gppylib.operations.package import SyncPackages
     from gppylib.programs.clsRecoverSegment_triples import get_segments_with_running_basebackup
     from gppylib.operations.utils import ParallelOperation
@@ -152,6 +153,8 @@ def parseargs():
                       help='Do not prompt for confirmation to proceed on warnings')
     parser.add_option('', '--hba-hostnames', action='store_true', default=False,
                       help='use hostnames instead of CIDR in pg_hba.conf')
+    parser.add_option('', '--without-icproxy-check', action='store_true', default=False,
+                      help='no check the icproxy address')
     parser.add_option('--usage', action="briefhelp")
 
     parser.set_defaults(verbose=False, filters=[], slice=(None, None))
@@ -1428,11 +1431,13 @@ class gpexpand:
         self.pool.check_results()
 
         """
-        Build the list of delete statements based on the COORDINATOR_ONLY_TABLES
-        defined in gpcatalog.py
+        Build the list of DELETE and TRUNCATE statements based on the subset of
+        COORDINATOR_ONLY_TABLES defined in gpcatalog.py. Mapped tables cannot
+        be TRUNCATEd, and we will have DELETE from them.
         """
-        statements = ["delete from pg_catalog.%s" % tab for tab in COORDINATOR_ONLY_TABLES]
-
+        delete_statements = ["delete from pg_catalog.%s" % tab for tab in COORDINATOR_ONLY_TABLES_MAPPED]
+        truncate_statements = ["truncate pg_catalog.%s" % tab for tab in COORDINATOR_ONLY_TABLES_NON_MAPPED]
+        statements = delete_statements + truncate_statements
         """
           Connect to each database in the new segments, and clean up the catalog tables.
         """
@@ -1999,6 +2004,63 @@ class gpexpand:
         else:
             self.logger.info("Heap checksum setting consistent across cluster")
 
+    def validate_icproxy_addr(self, inputFileEntryList):
+        """
+        If we are in icproxy mode: the proxy addresses of newly added segments are still empty after
+        expansion. It will cause queries to hang forever.
+        So, we have to check if the user have already set gp_interconnect_proxy_addresses before.
+        And prompt user to set a proper value via gpconfig before expansion.
+        """
+
+        # get GUC value
+        conn = dbconn.connect(_gp_expand.dburl, encoding='UTF8')
+        try:
+            sql = "show gp_interconnect_proxy_addresses;"
+            icproxy_addresses_string = dbconn.queryRow(conn, sql)[0].strip()
+            sql = "show gp_interconnect_type;"
+            ic_type = dbconn.queryRow(conn, sql)[0].strip()
+        except DatabaseError as e:
+            if re.search('unrecognized configuration parameter', str(e)):
+                # no gp_interconnect_proxy_addresses in a distribution without `ENABLE_IC_PROXY`
+                # it means no need to check the proxy addresses, let's return directly
+                return
+            raise Exception("failed to query in validate_icproxy_addr, database error: %s" % str(e))
+        except Exception as e:
+            raise Exception("failed to query in validate_icproxy_addr, exception: %s" % str(e))
+        finally:
+            conn.close()
+
+        # check if newly added dbid exists in gp_interconnect_proxy_addresses
+        need_prompt = False
+        new_addresses_string = icproxy_addresses_string
+        if icproxy_addresses_string:
+            self.logger.info("ICProxy addresses has been set to: %s, start to checking if it contains newly added segs", icproxy_addresses_string)
+
+            dbid_set = set()
+            # icproxy_addresses_string example: 1:-1:gpdb:1432,2:0:gpdb:2000,3:1:gpdb:2001
+            for addr in icproxy_addresses_string.split(','):
+                db_id, content_id, host, port = addr.split(':')
+                dbid_set.add(db_id)
+
+            for seg in inputFileEntryList:
+                if seg.dbid not in dbid_set:
+                    need_prompt = True
+                    new_addresses_string += ",%s:%s:%s:{port}" % (seg.dbid, seg.contentId, seg.hostname.strip())
+                    self.logger.warning(" Missing the address of dbid %s in gp_interconnect_proxy_addresses" % (seg.dbid))
+
+            # prompt user to use gpconfig to set the proper value of gp_interconnect_proxy_addresses
+            if need_prompt:
+                if ic_type == "proxy":
+                    self.logger.error("Please run gpconfig to set gp_interconnect_proxy_addresses (replace the {port} with a proper value):")
+                    self.logger.error(" gpconfig -c gp_interconnect_proxy_addresses -v \"'%s'\" --skipvalidation" % (new_addresses_string))
+                    self.logger.error('then rerun gpexpand -i {input_file}')
+                    raise Exception("Checking ICProxy addresses failed")
+                else:
+                    self.logger.warning("Recommended that run gpconfig to set gp_interconnect_proxy_addresses (replace the {port} with a proper value):")
+                    self.logger.warning(" gpconfig -c gp_interconnect_proxy_addresses -v \"'%s'\" --skipvalidation" % (new_addresses_string))
+            else:
+                self.logger.info("Checking ICProxy addresses passed")
+        return
 
 # -----------------------------------------------
 class ExpandTable():
@@ -2496,7 +2558,7 @@ def main(options, args, parser):
             logger.error('Failed to connect to database.  Make sure the')
             logger.error('Greenplum instance you wish to expand is running')
             logger.error('and that your environment is correct, then rerun')
-            logger.error('gexpand ' + ' '.join(sys.argv[1:]))
+            logger.error('gpexpand ' + ' '.join(sys.argv[1:]))
             sys.exit(1)
 
         _gp_expand = gpexpand(logger, gparray, dburl, options, parallel=options.parallel)
@@ -2549,6 +2611,8 @@ def main(options, args, parser):
             _gp_expand.validate_heap_checksums()
             newSegList = _gp_expand.read_input_files()
             _gp_expand.addNewSegments(newSegList)
+            if not options.without_icproxy_check:
+                _gp_expand.validate_icproxy_addr(newSegList)
             newTableSpaceInfo = _gp_expand.read_tablespace_file()
             _gp_expand.sync_packages()
             _gp_expand.start_prepare()

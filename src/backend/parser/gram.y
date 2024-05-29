@@ -753,7 +753,7 @@ static void check_expressions_in_partition_key(PartitionSpec *spec, core_yyscan_
 	LEADING LEAKPROOF LEAST LEFT LEVEL LIKE LIMIT LISTEN LOAD LOCAL
 	LOCALTIME LOCALTIMESTAMP LOCATION LOCK_P LOCKED LOGGED
 
-	MAPPING MATCH MATERIALIZED MAXVALUE MEMORY_LIMIT
+	MAPPING MATCH MATERIALIZED MAXVALUE MEMORY_QUOTA
 	METHOD MINUTE_P MINVALUE MIN_COST MODE MONTH_P MOVE
 
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEW NEXT NO NONE
@@ -1046,7 +1046,7 @@ static void check_expressions_in_partition_key(PartitionSpec *spec, core_yyscan_
 			%nonassoc MASTER
 			%nonassoc MATCH
 			%nonassoc MAXVALUE
-			%nonassoc MEMORY_LIMIT
+			%nonassoc MEMORY_QUOTA
 			%nonassoc METHOD
 			%nonassoc MIN_COST
 			%nonassoc MINUTE_P
@@ -1651,9 +1651,9 @@ OptResourceGroupElem:
 				{
 					$$ = makeDefElem("cpuset", (Node *) makeString($2), @1);
 				}
-			| MEMORY_LIMIT SignedIconst
+			| MEMORY_QUOTA SignedIconst
 				{
-					$$ = makeDefElem("memory_limit", (Node *) makeInteger($2), @1);
+					$$ = makeDefElem("memory_quota", (Node *) makeInteger($2), @1);
 				}
 			| MIN_COST SignedIconst
 				{
@@ -4583,7 +4583,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $12;
 					n->tablespacename = $13;
 					n->if_not_exists = false;
-					n->gp_style_alter_part = false;
+					n->origin = ORIGIN_NO_GEN;
 					n->distributedBy = (DistributedBy *) $14;
 					n->relKind = RELKIND_RELATION;
 
@@ -4614,7 +4614,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $15;
 					n->tablespacename = $16;
 					n->if_not_exists = true;
-					n->gp_style_alter_part = false;
+					n->origin = ORIGIN_NO_GEN;
 					n->distributedBy = (DistributedBy *) $17;
 					n->relKind = RELKIND_RELATION;
 
@@ -4646,7 +4646,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $11;
 					n->tablespacename = $12;
 					n->if_not_exists = false;
-					n->gp_style_alter_part = false;
+					n->origin = ORIGIN_NO_GEN;
 					n->distributedBy = (DistributedBy *) $13;
 					n->relKind = RELKIND_RELATION;
 
@@ -4678,7 +4678,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $14;
 					n->tablespacename = $15;
 					n->if_not_exists = true;
-					n->gp_style_alter_part = false;
+					n->origin = ORIGIN_NO_GEN;
 					n->distributedBy = (DistributedBy *) $16;
 					n->relKind = RELKIND_RELATION;
 
@@ -4710,7 +4710,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $13;
 					n->tablespacename = $14;
 					n->if_not_exists = false;
-					n->gp_style_alter_part = false;
+					n->origin = ORIGIN_NO_GEN;
 					n->distributedBy = NULL;
 					n->relKind = RELKIND_RELATION;
 
@@ -4742,7 +4742,7 @@ CreateStmt:	CREATE OptTemp TABLE qualified_name '(' OptTableElementList ')'
 					n->oncommit = $16;
 					n->tablespacename = $17;
 					n->if_not_exists = true;
-					n->gp_style_alter_part = false;
+					n->origin = ORIGIN_NO_GEN;
 					n->distributedBy = NULL;
 					n->relKind = RELKIND_RELATION;
 
@@ -5461,6 +5461,10 @@ OptFirstPartitionSpec: PartitionSpec opt_list_subparts OptTabPartitionSpec
 					if ($1->gpPartDef)
 						check_expressions_in_partition_key($1, yyscanner);
 					$$ = $1;
+					/* Do not allow SUBPARTITION BY clause for empty partition hierarchy */
+					if (!$1->gpPartDef && $1->subPartSpec)
+						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("SUBPARTITION BY clause is not allowed when no partitions specified at depth 1")));
 
 					pg_yyget_extra(yyscanner)->tail_partition_magic = true;
 				}
@@ -5488,6 +5492,12 @@ OptSecondPartitionSpec:
 					 */
 					if (n->gpPartDef)
 						check_expressions_in_partition_key(n, yyscanner);
+
+					/* Do not allow SUBPARTITION BY clause for empty partition hierarchy */
+					if (!n->gpPartDef && n->subPartSpec)
+						ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("SUBPARTITION BY clause is not allowed when no partitions specified at depth 1")));
+
 					$$ = n;
 
 					pg_yyget_extra(yyscanner)->tail_partition_magic = false;
@@ -8016,9 +8026,14 @@ TriggerForSpec:
 				}
 			| /* EMPTY */
 				{
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("Triggers for statements are not yet supported")));
+					/* let creation of triggers go through for pg_restore when upgrading from GP6 to GP7 */
+					if (!gp_enable_statement_trigger)
+					{
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("Triggers for statements are not yet supported")));
+					}
+					$$ = false;
 				}
 		;
 
@@ -8031,9 +8046,14 @@ TriggerForType:
 			ROW										{ $$ = true; }
 			| STATEMENT
 			{
+				/* let creation of triggers go through for pg_restore when upgrading from GP6 to GP7 */
+				if (!gp_enable_statement_trigger)
+				{
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("Triggers for statements are not yet supported")));
+				}
+				$$ = false;
 			}
 		;
 
@@ -18226,7 +18246,7 @@ unreserved_keyword:
 			| MATCH
 			| MATERIALIZED
 			| MAXVALUE
-			| MEMORY_LIMIT
+			| MEMORY_QUOTA
 			| METHOD
 			| MINUTE_P
 			| MINVALUE
@@ -18571,7 +18591,7 @@ PartitionIdentKeyword: ABORT_P
 			| MASTER
 			| MATCH
 			| MAXVALUE
-			| MEMORY_LIMIT
+			| MEMORY_QUOTA
 			| METHOD
 			| MINVALUE
 			| MISSING

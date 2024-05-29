@@ -73,7 +73,6 @@ int							gp_resgroup_memory_policy = RESMANAGER_MEMORY_POLICY_NONE;
 bool						gp_log_resgroup_memory = false;
 int							gp_resgroup_memory_query_fixed_mem;
 int							gp_resgroup_memory_policy_auto_fixed_mem;
-bool						gp_resgroup_print_operator_memory_limits = false;
 
 bool						gp_resgroup_debug_wait_queue = true;
 int							gp_resource_group_queuing_timeout = 0;
@@ -807,11 +806,13 @@ ResGroupAlterOnCommit(const ResourceGroupCallbackContext *callbackCtx)
 		}
 		else if (callbackCtx->limittype == RESGROUP_LIMIT_TYPE_IO_LIMIT)
 		{
-			if (callbackCtx->caps.io_limit != NIL)
-			{
-				cgroupOpsRoutine->cleario(callbackCtx->groupid);
-				cgroupOpsRoutine->setio(callbackCtx->groupid, callbackCtx->caps.io_limit);
-			}
+			/*
+			 * When alter io_limit to -1 , the caps.io_limit will be nil.
+			 * There are no errors in io_limit string when caps.io_limit is nil.
+			 * When alter io_limit, caps.io_limit is nil means this resource group's io_limit should be clear.
+			 */
+			cgroupOpsRoutine->cleario(callbackCtx->groupid);
+			cgroupOpsRoutine->setio(callbackCtx->groupid, callbackCtx->caps.io_limit);
 		}
 
 		/* reset default group if cpuset has changed */
@@ -1431,7 +1432,7 @@ SerializeResGroupInfo(StringInfo str)
 	appendBinaryStringInfo(str, (char *) &itmp, sizeof(int32));
 	itmp = htonl(caps->cpuWeight);
 	appendBinaryStringInfo(str, (char *) &itmp, sizeof(int32));
-	itmp = htonl(caps->memory_limit);
+	itmp = htonl(caps->memory_quota);
 	appendBinaryStringInfo(str, (char *) &itmp, sizeof(int32));
 	itmp = htonl(caps->min_cost);
 	appendBinaryStringInfo(str, (char *) &itmp, sizeof(int32));
@@ -1472,7 +1473,7 @@ DeserializeResGroupInfo(struct ResGroupCaps *capsOut,
 	memcpy(&itmp, ptr, sizeof(int32)); ptr += sizeof(int32);
 	capsOut->cpuWeight = ntohl(itmp);
 	memcpy(&itmp, ptr, sizeof(int32)); ptr += sizeof(int32);
-	capsOut->memory_limit = ntohl(itmp);
+	capsOut->memory_quota = ntohl(itmp);
 	memcpy(&itmp, ptr, sizeof(int32)); ptr += sizeof(int32);
 	capsOut->min_cost = ntohl(itmp);
 
@@ -3630,7 +3631,7 @@ ResourceGroupGetQueryMemoryLimit(void)
 	LWLockAcquire(ResGroupLock, LW_SHARED);
 
 	caps = &self->group->caps;
-	resgLimit = caps->memory_limit;
+	resgLimit = caps->memory_quota;
 
 	AssertImply(resgLimit < 0, resgLimit == -1);
 	if (resgLimit == -1)

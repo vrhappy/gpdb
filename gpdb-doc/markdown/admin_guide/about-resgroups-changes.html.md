@@ -16,7 +16,7 @@ The following table compares the main concepts of resource management and how ea
 |Queueing|Queue when no slot is available or not enough available memory|Queue when no slot is available|
 |Query Failure|Query may fail after reaching transaction fixed memory limit when no shared resource group memory exists and the transaction requests more memory|Query may fail if the allocated memory for the query surpasses the available system memory and spill limits|
 |Limit Bypass|Limits are not enforced on `SET`, `RESET`, and `SHOW` commands|Limits are not enforced on `SET`, `RESET`, and `SHOW` commands. Additionally, certain queries may be configured to bypass the concurrency limit|
-|External Components|Manage PL/Container CPU and memory resources|None|
+|External Components|Manage PL/Container CPU and memory resources|Manage PL/Container CPU resources|
 
 > **Note** Disk I/O limits are only available when you use Linux Control Groups v2. See [Configuring and Using Resource Groups](workload_mgmt_resgroups.html#topic71717999) for more information.
 
@@ -27,8 +27,6 @@ You may configure four new resource group attributes using the `CREATE RESOURCE 
 - `CPU_WEIGHT`, which configures the scheduling priority of the resource group.
 - `MIN_COST`, which configures the minimum amount a query's query plan cost for the query to remain in the resource group.
 - `IO_LIMIT`, which configures device I/O usage at the resource group level to manage the maximum throughput of read/write operations, and the maximum read/write operations per second. 
-
-In addition, the limit `MEMORY_LIMIT` is now an integer (in MB), instead of a percentage.
 
 The following resource group attributes have been removed:
 - `CPU_RATE_LIMIT`

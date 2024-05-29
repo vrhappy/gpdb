@@ -74,7 +74,7 @@ typedef struct ResGroupCaps
 	ResGroupCap		concurrency;
 	ResGroupCap		cpuMaxPercent;
 	ResGroupCap		cpuWeight;
-	ResGroupCap		memory_limit;
+	ResGroupCap		memory_quota;
 	volatile ResGroupCap	min_cost;
 
 	/*
@@ -99,7 +99,6 @@ extern int						gp_resgroup_memory_policy;
 extern bool						gp_log_resgroup_memory;
 extern int						gp_resgroup_memory_query_fixed_mem;
 extern int						gp_resgroup_memory_policy_auto_fixed_mem;
-extern bool						gp_resgroup_print_operator_memory_limits;
 extern bool						gp_resgroup_debug_wait_queue;
 
 extern int gp_resource_group_cpu_priority;
@@ -109,6 +108,7 @@ extern int gp_resource_group_queuing_timeout;
 extern bool gp_resource_group_bypass_catalog_query;
 extern int gp_resource_group_move_timeout;
 extern bool gp_resource_group_bypass_direct_dispatch;
+extern char *gp_resource_group_cgroup_parent;
 
 /*
  * Non-GUC global variables.

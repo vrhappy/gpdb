@@ -84,12 +84,24 @@ class GpRecoverSegmentProgram:
     def outputToFile(self, mirrorBuilder, gpArray, fileName):
         lines = []
 
+        # Entry for a failed segment will be commented if failed segment host is unreachable to inform the user about
+        # those unreachable hosts. As we know gprecoverseg skips the recovery of a segment if host is unreachable so if
+        # the user wants to recover it to another host, they can do so by uncommenting the line and adding the
+        # failover details.
+        lines.append("# If any entry is commented, please know that it belongs to failed segment which is unreachable."
+                     "\n# If you need to recover them, please modify the segment entry and add failover details "
+                     "\n# (failed_addresss|failed_port|failed_dataDirectory<space>failover_addresss|failover_port|failover_dataDirectory) "
+                     "to recover it to another host.\n")
+
         # one entry for each failure
         for mirror in mirrorBuilder.getMirrorsToBuild():
             output_str = ""
             seg = mirror.getFailedSegment()
             addr = canonicalize_address(seg.getSegmentAddress())
             output_str += ('%s|%d|%s' % (addr, seg.getSegmentPort(), seg.getSegmentDataDirectory()))
+            if seg.unreachable:
+                # Entry is commented if failed segment host is unreachable
+                output_str = "#{}".format(output_str)
 
             seg = mirror.getFailoverSegment()
             if seg is not None:
@@ -107,7 +119,9 @@ class GpRecoverSegmentProgram:
             return GpSegmentRebalanceOperation(gpEnv, gpArray, self.__options.parallelDegree, self.__options.parallelPerHost, self.__options.disableReplayLag, self.__options.replayLag)
 
         instance = RecoveryTripletsFactory.instance(gpArray, self.__options.recoveryConfigFile, self.__options.newRecoverHosts, self.__options.outputSampleConfigFile, self.__options.parallelDegree)
-        segs = [GpMirrorToBuild(t.failed, t.live, t.failover, self.__options.forceFullResynchronization, self.__options.differentialResynchronization) for t in instance.getTriplets()]
+
+        segs = [GpMirrorToBuild(t.failed, t.live, t.failover, self.__options.forceFullResynchronization, self.__options.differentialResynchronization, t.recovery_type) for t in instance.getTriplets()]
+
         return GpMirrorListToBuild(segs, self.__pool, self.__options.quiet,
                                    self.__options.parallelDegree,
                                    instance.getInterfaceHostnameWarnings(),
@@ -278,14 +292,15 @@ class GpRecoverSegmentProgram:
         optionCnt = 0
         if self.__options.newRecoverHosts is not None:
             optionCnt += 1
-        if self.__options.recoveryConfigFile is not None:
-            optionCnt += 1
         if self.__options.rebalanceSegments:
             optionCnt += 1
-        if self.__options.differentialResynchronization:
-            optionCnt += 1
         if optionCnt > 1:
-            raise ProgramArgumentValidationException("Only one of -i, -p, -r and --differential may be specified")
+            raise ProgramArgumentValidationException("Only one of -p and -r may be specified")
+        if optionCnt > 0 and self.__options.recoveryConfigFile is not None:
+            raise ProgramArgumentValidationException("Only one of -i, -p and -r may be specified")
+
+        if optionCnt > 0 and self.__options.differentialResynchronization:
+            raise ProgramArgumentValidationException("Only one of -p, -r and --differential may be specified")
 
         # verify "mode to recover" options
         if self.__options.forceFullResynchronization and self.__options.differentialResynchronization:
@@ -461,6 +476,9 @@ class GpRecoverSegmentProgram:
             if self.termination_requested:
                 self.logger.info("Not able to terminate the recovery process since it has been completed successfully.")
 
+            self.logger.info("********************************")
+            self.logger.info("Future gprecoverseg executions might remove the currently created pg_basebackup/pg_rewind/rsync "
+                             "progress files, please save these files if needed.")
             self.logger.info("********************************")
             self.logger.info("Segments successfully recovered.")
             self.logger.info("********************************")

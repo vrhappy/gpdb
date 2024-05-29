@@ -36,6 +36,7 @@ Greenplum Database provides the following system views:
 -   [gp_stat_progress_cluster](#gp_stat_progress_cluster)
 -   [gp_stat_progress_copy](#gp_stat_progress_copy)
 -   [gp_stat_progress_create_index](#gp_stat_progress_create_index)
+-   [gp_stat_progress_dtx_recovery](#gp_stat_progress_dtx_recovery)
 -   [gp_stat_progress_vacuum](#gp_stat_progress_vacuum)
 -   [gp_stat_replication](#gp_stat_replication)
 -   [gp_stat_resqueues](#gp_stat_resqueues)
@@ -100,6 +101,7 @@ For more information on summary views, see [Summary Views](#summary_views), belo
 - gp_stat_progress_cluster_summary
 - gp_stat_progress_copy_summary
 - gp_stat_progress_create_index_summary
+- gp_stat_progress_dtx_recovery
 - gp_stat_progress_vacuum_summary
 - gp_stat_slru_summary
 - gp_stat_sys_indexes_summary
@@ -276,17 +278,17 @@ The `gp_toolkit.gp_resgroup_config` view allows administrators to see the curren
 
 > **Note** The `gp_resgroup_config` view is valid only when resource group-based resource management is active.
 
-|column|type|references|description|
-|------|----|----------|-----------|
-|`groupid`|oid|pg\_resgroup.oid|The ID of the resource group.|
-|`groupname`|name|pg\_resgroup.rsgname|The name of the resource group.|
-|`concurrency`|text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 1|The concurrency \(`CONCURRENCY`\) value specified for the resource group.|
-|`cpu_max_percent`|text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 2|The CPU limit \(`CPU_MAX_PERCENT`\) value specified for the resource group, or -1.|
-|`cpu_weight`|text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 3|The scheduling priority of the resource group (CPU_WEIGHT).|
-|`cpuset`|text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 4|The CPU cores reserved for the resource group (CPUSET), or -1.|
-|`memory_limit`|text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 5|The memory limit \(`MEMORY_LIMIT`\) value specified for the resource group.|
-|`min_cost`|text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 6|The minimum cost of a query plan to be included in the resource group (MIN_COST).|
-|`io_limit`|text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 7|The maximum read/write sequential disk I/O throughput, and the maximum read/write I/O operations per second for the queries assigned to a specific tablespace (shown as the tablespace oid) and resource group (IO_LIMIT).|
+| column            |type|references| description                                                                                                                                                                                                                |
+|-------------------|----|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `groupid`         |oid|pg\_resgroup.oid| The ID of the resource group.                                                                                                                                                                                              |
+| `groupname`       |name|pg\_resgroup.rsgname| The name of the resource group.                                                                                                                                                                                            |
+| `concurrency`     |text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 1| The concurrency \(`CONCURRENCY`\) value specified for the resource group.                                                                                                                                                  |
+| `cpu_max_percent` |text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 2| The CPU limit \(`CPU_MAX_PERCENT`\) value specified for the resource group, or -1.                                                                                                                                         |
+| `cpu_weight`      |text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 3| The scheduling priority of the resource group (CPU_WEIGHT).                                                                                                                                                                |
+| `cpuset`          |text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 4| The CPU cores reserved for the resource group (CPUSET), or -1.                                                                                                                                                             |
+| `memory_quota`    |text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 5| The memory quota \(`MEMORY_QUOTA`\) value specified for the resource group.                                                                                                                                          |
+| `min_cost`        |text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 6| The minimum cost of a query plan to be included in the resource group (MIN_COST).                                                                                                                                          |
+| `io_limit`        |text|pg\_resgroupcapability.value for pg\_resgroupcapability.reslimittype = 7| The maximum read/write sequential disk I/O throughput, and the maximum read/write I/O operations per second for the queries assigned to a specific tablespace (shown as the tablespace oid) and resource group (IO_LIMIT). |
 
 ## <a id="gp_resgroup_iostats_per_host"></a>gp_resgroup_iostats_per_host
 
@@ -835,6 +837,21 @@ The `gp_stat_progress_create_index_summary` view aggregates across the Greenplum
 | `tuples_done` | bigint | Number of tuples already processed in the current phase. |
 | `partitions_total` | bigint | When creating an index on a partitioned table, this column is set to the total number of partitions on which the index is to be created. This field is 0 during a `REINDEX`. |
 | `partitions_done` | bigint | When creating an index on a partitioned table, this column is set to the number of partitions on which the index has been completed. This field is 0 during a `REINDEX`. |
+
+### <a id="gp_stat_progress_dtx_recovery"></a>gp_stat_progress_dtx_recovery
+
+The `gp_stat_progress_dtx_recovery` view is a cluster-wide view that displays the progress of the Distributed Transaction (DTX) Recovery process, which runs in the backgroup during Postgres startup. 
+
+This view may be useful if a coordinator restart remains in a recovery state for a long time. Greenplum will not accept connections until all "in-doubt" transactions are resolved. In-doubt transactions are transactions that have been prepared but not committed yet. If there were many transactions running before the coordinator restarted, the recovery of the database may take longer than expected, and you may use this view to monitor the current phase of the recovery. Note that in this scenario, as Greenplum is still starting up, you will need to access the database in utility mode to check this view.
+
+|Column|Type|Description|
+|------|----|-----------|
+|`phase`|text | Status of the recovery. The possible values are: 'initializing', 'recovering commited distributed transactions', 'gathering in-doubt transactions', 'aborting in-doubt transactions', 'gathering in-doubt orphaned transactions', and 'managing in-doubt orphaned transactions'.|
+|`recover_commited_dtx_total`|integer| Total number of committed transactions found to recover.|
+|`recover_commited_dtx_completed`|integer| Number of committed transactions that have been recovered.| 
+| in_doubt_tx_total`|integer| Total number of in-doubt transaction found, used in startup and non-startup phases.|
+|`in_doubt_tx_in_progress`|integer| Number of in-progress, in-doubt transactions.|
+|`in_doubt_tx_aborted`|integer| Number of aborted in-doubt transactions.|
 
 ### <a id="gp_stat_progress_vacuum"></a>gp_stat_progress_vacuum
 

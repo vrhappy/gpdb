@@ -1,5 +1,10 @@
+-- start_matchsubs
+-- m/\(cost=.*\)/
+-- s/\(cost=.*\)//
+-- end_matchsubs
 create schema qp_subquery;
 set search_path to qp_subquery;
+set optimizer_trace_fallback to on;
 
 begin;
 CREATE TABLE SUBSELECT_TBL1 (f1 integer, f2 integer, f3 float);
@@ -731,5 +736,66 @@ from (
       from a3
       )t;
 
+-- check various [NOT] EXISTS subqueries on materialized views
+create table t (a int, b int) distributed by (a);
+insert into t values (1, 1), (2, NULL), (NULL, 3);
+
+create materialized view v as select a, b from t distributed randomly;
+
+select * from v where exists (select a from v);
+select * from v where exists (select a from v limit 0);
+select * from v where exists (select a from v where a=2);
+select * from v where exists (select a from v where a<>2);
+
+select * from v where not exists (select a from v);
+select * from v where not exists (select a from v limit 0);
+select * from v where not exists (select a from v where a=2);
+select * from v where not exists (select a from v where a<>2);
+
+select * from v where exists (select b from v);
+select * from v where exists (select b from v limit 0);
+select * from v where exists (select b from v where b=2);
+select * from v where exists (select b from v where b<>2);
+
+select * from v where not exists (select b from v);
+select * from v where not exists (select b from v limit 0);
+select * from v where not exists (select b from v where b=2);
+select * from v where not exists (select b from v where b<>2);
+
+-- Check that a query having pattern of Select-Project-NaryJoin,
+-- also containing a Select predicate condition with the same pattern nested in a subquery runs
+CREATE TABLE tab1(a TEXT, b TEXT) DISTRIBUTED RANDOMLY;
+INSERT INTO tab1 SELECT i,i FROM GENERATE_SERIES(1,3)i;
+
+SELECT * FROM (SELECT BTRIM(p1.b) AS param FROM tab1 p1 JOIN tab1 p2 USING(a)) t1
+WHERE EXISTS
+          (SELECT 1 FROM
+              (SELECT BTRIM(p1.b) AS param FROM tab1 p1 JOIN tab1 p2 USING(a)) t2
+           WHERE t2.param = t1.param);
+
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT BTRIM(p1.b) AS param FROM tab1 p1 JOIN tab1 p2 USING(a)) t1
+WHERE EXISTS
+          (SELECT 1 FROM
+              (SELECT BTRIM(p1.b) AS param FROM tab1 p1 JOIN tab1 p2 USING(a)) t2
+           WHERE t2.param = t1.param);
+
+-- Check that a query having pattern of Select-Project-NaryJoin,
+-- also containing a Select predicate condition with the same pattern nested in a subquery runs when subplan is enforced
+SET optimizer_enforce_subplans TO on;
+SELECT * FROM (SELECT BTRIM(p1.b) AS param FROM tab1 p1 JOIN tab1 p2 USING(a)) t1
+WHERE EXISTS
+          (SELECT 1 FROM
+              (SELECT BTRIM(p1.b) AS param FROM tab1 p1 JOIN tab1 p2 USING(a)) t2
+           WHERE t2.param = t1.param);
+
+EXPLAIN (COSTS OFF) SELECT * FROM (SELECT BTRIM(p1.b) AS param FROM tab1 p1 JOIN tab1 p2 USING(a)) t1
+WHERE EXISTS
+          (SELECT 1 FROM
+              (SELECT BTRIM(p1.b) AS param FROM tab1 p1 JOIN tab1 p2 USING(a)) t2
+           WHERE t2.param = t1.param);
+
+reset optimizer_enforce_subplans;
+
 set client_min_messages='warning';
 drop schema qp_subquery cascade;
+reset optimizer_trace_fallback;

@@ -10,6 +10,8 @@
 -- start_matchsubs
 -- m/DETAIL:  Failing row contains \(.*\)/
 -- s/DETAIL:  Failing row contains \(.*\)/DETAIL:  Failing row contains (#####)/
+-- m/\(cost=.*\)/
+-- s/\(cost=.*\)//
 -- end_matchsubs
 begin;
 CREATE TABLE dml_union_r (
@@ -760,6 +762,16 @@ select * from generate_series(100, 105);
 select a from t_test_append_rep
 union all
 select * from generate_series(100, 105);
+
+-- test INTERSECT/EXCEPT with General and partitioned locus, but none of the columns are hashable
+CREATE TABLE p1(a int) distributed by (a);
+INSERT INTO p1 select generate_series(1,10);
+explain (costs off)
+select from generate_series(1,5) intersect select from p1;
+select from generate_series(1,5) intersect select from p1;
+explain (costs off)
+select from generate_series(1,5) except select from p1;
+select from generate_series(1,5) except select from p1;
 
 --
 -- Test for creation of MergeAppend paths.
